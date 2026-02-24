@@ -1,0 +1,21 @@
+{
+    "payable_funcs": ["bid"],
+    "triggers": {
+        "started": {"value": "1", "emit": "Start", "args": []},
+        "highestBid": {"emit": "Bid", "args": ["msg.sender", "msg.value"]},
+        "ended": {"value": "1", "emit": "End", "args": ["highestBidder", "highestBid"]},
+        "bids": {"value": "0", "emit": "Withdraw", "args": ["msg.sender", "temp_amount"]}
+    },
+    "events": {
+        "Start": [],
+        "Bid": ["address indexed sender", "uint256 amount"],
+        "Withdraw": ["address indexed bidder", "uint256 amount"],
+        "End": ["address winner", "uint256 amount"]
+    },
+    "mappings": {
+        "agents": {
+            "bidder": "msg.sender",
+            "bidder.address": "msg.sender"
+        }
+    }
+}

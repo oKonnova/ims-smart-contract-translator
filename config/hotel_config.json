@@ -1,0 +1,23 @@
+{
+    "payable_funcs": ["book", "receive"],
+    "triggers": {
+        "currentRoomStatus": {
+            "value": "Statuses.Occupied",
+            "emit": "Occupy",
+            "args": ["msg.sender", "msg.value"]
+        }
+    },
+    "events": {
+        "Occupy": ["address _occupant", "uint256 _value"]
+    },
+    "mappings": {
+        "agents": {
+            "hotelRoom": "address(this)",
+            "client": "msg.sender",
+            "ownerAddress": "owner",
+            "contract": "address(this)",
+            "msg.sender": "msg.sender",
+            "msg.value": "msg.value"
+        }
+    }
+}
