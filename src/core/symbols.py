@@ -6,7 +6,7 @@ from typing import Optional
 class Symbol:
     """
     An abstract representation of a system variable or entity.
-    Stores native IMS types (e.g., 'int', 'function' etc).
+    Stores native IMS types.
     """
     name: str
     type: str  # Native IMS type
@@ -14,6 +14,7 @@ class Symbol:
     is_mapping: bool = False
     key_type: Optional[str] = None
     value_type: Optional[str] = None
+    is_payable: bool = False  # Added flag for capability-based type refinement
 
 class SymbolTable:
     """
@@ -24,7 +25,7 @@ class SymbolTable:
         self.symbols = {}
         self.config = config
 
-    def define(self, name: str, type_str: str, is_state: bool = False):
+    def define(self, name: str, type_str: str, is_state: bool = False, is_payable: bool = False):
         """
         Registers a new symbol.
         If the type is IMS function(K)->V, we store it as 'function'.
@@ -52,7 +53,8 @@ class SymbolTable:
             is_state=is_state, 
             is_mapping=is_mapping, 
             key_type=k_t, 
-            value_type=v_t
+            value_type=v_t,
+            is_payable=is_payable 
         )
 
     def lookup(self, name: str) -> Optional[Symbol]:

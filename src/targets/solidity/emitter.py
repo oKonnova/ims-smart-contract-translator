@@ -12,12 +12,14 @@ class SolidityEmitter(BaseEmitter):
         lines.append("// SPDX-License-Identifier: MIT")
         lines.append("pragma solidity ^0.8.20;\n")
 
-        # 1. Interfaces (from config)
-        for iface in self.config.get("interfaces", {}).values():
-            lines.extend(iface["source"])
-            lines.append("")
+        # 1. Interfaces (from config) - only those the contract actually uses
+        used_types = {sym.type for sym in self.symbols.symbols.values() if sym.is_state}
+        for iface_name, iface in self.config.get("interfaces", {}).items():
+            if iface_name in used_types:
+                lines.extend(iface["source"])
+                lines.append("")
 
-        lines.append("contract GeneratedContract {")
+        lines.append(f"contract {self.config.get('contract_name', 'GeneratedContract')} {{")
 
         # 2. Enums
         for e_name, values in self.enums.items():
@@ -51,7 +53,10 @@ class SolidityEmitter(BaseEmitter):
             k_t = self._map_type(sym.key_type)
             v_t = self._map_type(sym.value_type)
             return f"mapping({k_t} => {v_t})"
-        return self._map_type(sym.type)
+        base = self._map_type(sym.type)
+        if getattr(sym, "is_payable", False) and base == "address":
+            return f"{base} payable"
+        return base
 
     def _emit_function(self, f: FunctionDef) -> List[str]:
         lines = []
@@ -101,7 +106,7 @@ class SolidityEmitter(BaseEmitter):
                 
             elif isinstance(n, IRNativeTransfer):
                 lines.append(f'{ind}(bool success, ) = payable({n.recipient}).call{{value: {n.amount}}}("");')
-                lines.append(f'{ind}require(success, "Transfer failed");')
+                lines.append(f'{ind}require(success, "{self.config.get("messages", {}).get("transfer_failed", "Transfer failed")}");')
                 
             elif isinstance(n, IRExternalCall):
                 lines.append(f"{ind}{n.target}.{n.method}({', '.join(n.args)});")

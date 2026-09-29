@@ -1,11 +1,22 @@
 SOLIDITY_STD_CONFIG = {
+    # Names the target language reserves for special functions (they cannot take arguments)
+    "special_functions": ["receive", "fallback"],
+    "special_function_rename": "{name}Fn",
+    # Identifiers that denote the execution context, not contract state
+    "context_prefixes": ["msg.", "block.", "tx."],
+    "messages": {"guard_failed": "Check failed", "transfer_failed": "Transfer failed"},
+    "naming": {"group_separator": "_", "local_prefix": "temp_", "emit_effectless_actions": False},
     "mappings": {
         "types": {
             "int": "uint256",
             "Boolean": "bool",
             "Bytes": "bytes",
             "Address": "address",
-            "function": "mapping" 
+            "function": "mapping",
+            "real": "uint256"
+        },
+        "casting": {
+            "payable": "payable({val})"
         },
         "agents": {
             "msg_sender": "msg.sender",
@@ -21,6 +32,7 @@ SOLIDITY_STD_CONFIG = {
             "address_0": "address(0)",
             "value": "msg.value"
         },
+        "clock": "(block.timestamp / 1 days)",
         "modifiers": {
             "payable": "payable",
             "external": "external",
@@ -34,7 +46,8 @@ SOLIDITY_STD_CONFIG = {
                 "method": "safeTransferFrom",
                 "method_transfer_from": "transferFrom",
                 "args_order": ["from", "to", "tokenId"],
-                "ownership_props": ["owner"]
+                "ownership_props": ["owner"],
+                "token_id": "{agent}Id"
             },
             "IERC20": {
                 "method": "transfer",
@@ -42,8 +55,10 @@ SOLIDITY_STD_CONFIG = {
                 "args_order": ["to", "amount"],
                 "ownership_props": ["balance"]
             },
-            "nft": { "type": "IERC721" },
-            "token": { "type": "IERC20" }
+        },
+        "interface_by_agent_type": {
+            "NFT": "IERC721",
+            "Token": "IERC20"
         }
     },
 

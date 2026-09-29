@@ -1,0 +1,6 @@
+AuctionTest:test_ContractSize() (gas: 8467)
+AuctionTest:test_Gas_Bid() (gas: 84622)
+AuctionTest:test_Gas_Deployment() (gas: 1025287)
+AuctionTest:test_Gas_StartAuction() (gas: 66439)
+CounterTest:testFuzz_SetNumber(uint256) (runs: 256, μ: 28822, ~: 29289)
+CounterTest:test_Increment() (gas: 28783)

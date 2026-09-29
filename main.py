@@ -26,6 +26,9 @@ def main():
     
     code = compiler.compile()
     
+    for w in compiler.warnings:
+        print(f"WARNING: {w}")
+
     with open(args.out, 'w', encoding='utf-8') as f:
         f.write(code)
         print(f"Done! Smart contract successfully saved to {args.out}")

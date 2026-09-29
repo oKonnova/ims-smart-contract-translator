@@ -33,18 +33,36 @@ class EffectClassifier:
         sender_alias = self.config["mappings"]["agents"].get("msg_sender")
 
         # ---------------------------------------------------------
-        # 1. VALUE OUTFLOW 
+        # 1. NATIVE-CURRENCY MOVEMENTS  (<agent>.balance updates)
+        #    X.balance = X.balance + E   credit of X
+        #    X.balance = X.balance - E   debit of X (implicit on the EVM side, dropped)
+        #    C.balance = 0               sweep of the contract (implicit in the outflow)
+        #    credit of the contract  -> VALUE_INFLOW  (msg.value, function is payable)
+        #    credit of anybody else  -> VALUE_OUTFLOW (transfer out of the contract)
         # ---------------------------------------------------------
         if isinstance(target_node, MemberAccess) and target_node.member == "balance":
+            owner_is_contract = self.analyzer.is_contract_ref(target_node.object)
             recipient_src = self.analyzer.visit(target_node.object)
-            
-            if recipient_src == contract_alias: 
+
+            delta = None
+            if (isinstance(value_node, BinaryExpr) and value_node.op in ("+", "-")
+                    and self.analyzer.visit(value_node.left) == target_src):
+                delta = (value_node.op, self.analyzer.visit(value_node.right))
+
+            if delta is None:
+                if owner_is_contract and isinstance(value_node, Literal) and str(value_node.value) == "0":
+                    return []
+                self.analyzer.warnings.append(
+                    f"{self.current_func}: unsupported balance update '{target_src} = {value_src}' was ignored")
                 return []
 
-            if isinstance(value_node, BinaryExpr) and value_node.op == "+":
-                amount_src = self.analyzer.visit(value_node.right)
-                return [Effect(EffectType.VALUE_OUTFLOW, target=recipient_src, payload=amount_src)]
-            return []
+            sign, amount_src = delta
+            if sign == "-":
+                return []
+            if owner_is_contract:
+                self.analyzer.uses_native_value = True
+                return [Effect(EffectType.VALUE_INFLOW, payload=amount_src)]
+            return [Effect(EffectType.VALUE_OUTFLOW, target=recipient_src, payload=amount_src)]
 
         # ---------------------------------------------------------
         # 2. EXTERNAL CALLS (Tokens, NFTs)
@@ -57,14 +75,12 @@ class EffectClassifier:
             sym = self.symbols.lookup(obj_node.name) if isinstance(obj_node, Identifier) else None
 
             iface_type = sym.type if sym else None
-            if not iface_type and "nft" in obj_name.lower():
-                iface_type = self.config["heuristics"]["interfaces"].get("nft", {}).get("type")
 
-            if iface_type and iface_type in self.config["heuristics"]["interfaces"]:
+            if iface_type and iface_type in self.config.get("heuristics", {}).get("interfaces", {}):
                 conf = self.config["heuristics"]["interfaces"][iface_type]
                 
                 if prop_name in conf.get("ownership_props", []):
-                    token_id = f"{obj_name}Id"
+                    token_id = conf.get("token_id", "{agent}Id").format(agent=obj_name)
 
                     if value_src == contract_alias:
                         method = conf.get("method_transfer_from", "transferFrom")
@@ -88,11 +104,12 @@ class EffectClassifier:
         sym = self.symbols.lookup(root_target)
 
         if sym and sym.type in self.config.get("heuristics", {}).get("interfaces", {}):
-            if value_src.startswith("_"): 
+            if value_src in self.analyzer.current_args:
                 value_src = f"{sym.type}({value_src})"
 
         # --- AUTO EVENTS ---
-        if root_target in self.config.get("triggers", {}) and self.current_func != "constructor":
+        constructor_names = self.config.get("constructor_names", ["constructor", "__init__"])
+        if root_target in self.config.get("triggers", {}) and self.current_func not in constructor_names:
             trigger = self.config["triggers"][root_target]
             should_emit = True
             if "value" in trigger and value_src.strip() != trigger["value"]: 
@@ -109,6 +126,6 @@ class EffectClassifier:
 
         value_alias = self.config["mappings"]["agents"].get("value", "msg.value")
         if value_alias in value_src:
-            self.analyzer.has_eth = True
+            self.analyzer.uses_native_value = True
 
         return effects

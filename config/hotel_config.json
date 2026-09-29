@@ -1,14 +1,23 @@
 {
-    "payable_funcs": ["book", "receive"],
+    "payable_funcs": [
+        "book",
+        "receive"
+    ],
     "triggers": {
         "currentRoomStatus": {
             "value": "Statuses.Occupied",
             "emit": "Occupy",
-            "args": ["msg.sender", "msg.value"]
+            "args": [
+                "msg.sender",
+                "msg.value"
+            ]
         }
     },
     "events": {
-        "Occupy": ["address _occupant", "uint256 _value"]
+        "Occupy": [
+            "address _occupant",
+            "uint256 _value"
+        ]
     },
     "mappings": {
         "agents": {
@@ -19,5 +28,8 @@
             "msg.sender": "msg.sender",
             "msg.value": "msg.value"
         }
+    },
+    "function_aliases": {
+        "receive": "book"
     }
 }
