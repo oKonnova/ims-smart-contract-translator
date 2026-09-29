@@ -38,3 +38,15 @@ ehthumbs.db
 # ==========================================
 *.sol
 *.rs
+
+# ==========================================
+# Foundry & Cache
+# ==========================================
+lib/
+cache/
+out/
+broadcast/
+cache_forge/
+foundry.toml
+foundry.lock
+.gas-snapshot
