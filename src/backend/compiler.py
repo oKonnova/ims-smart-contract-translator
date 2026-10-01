@@ -541,8 +541,16 @@ class Compiler:
             func_effects.extend(all_effects)
 
             # --- C. Config-driven Security Reordering (CEI) ---
-            if self.config.get("security_patterns", {}).get("cei", True):
+            # Default OFF: the model's own postcondition order is preserved by default. 
+            # A model that is deliberately unsafe (e.g. a vulnerable-by-design example) 
+            # must stay unsafe in the generated code unless the user opts in here.
+            if self.config.get("security_patterns", {}).get("cei", False):
+                before = list(all_effects)
                 all_effects.sort(key=lambda e: 0 if e.type == EffectType.STATE_UPDATE else (1 if e.type == EffectType.EVENT_EMIT else 2))
+                if all_effects != before:
+                    self.warnings.append(
+                        f"{act['name']}: effects reordered under Checks-Effects-Interactions (security_patterns.cei=true); "
+                        f"this no longer matches the order written in the model's postcondition.")
 
             # --- D. IR generation ---
             ir_nodes = []
