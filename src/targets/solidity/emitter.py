@@ -1,6 +1,6 @@
 from typing import List
 from src.targets.base_emitter import BaseEmitter
-from src.core.ir_nodes import FunctionDef, IRAssign, IRNativeTransfer, IRExternalCall, IREmit
+from src.core.ir_nodes import FunctionDef, IRAssign, IRNativeTransfer, IRExternalCall, IREmit, StateMutability
 
 class SolidityEmitter(BaseEmitter):
     """
@@ -58,16 +58,33 @@ class SolidityEmitter(BaseEmitter):
             return f"{base} payable"
         return base
 
+    def _resolve_modifier_keyword(self, f: FunctionDef) -> str:
+        """
+        Solidity-specific rendering of the function's semantic properties (is_payable,
+        state_mutability) into the actual modifier keyword. MUTATING needs no keyword at
+        all in Solidity (it's the default), unlike e.g. a Vyper emitter that
+        might render every mutability state as an explicit decorator.
+        """
+        modmap = self.config.get("mappings", {}).get("modifiers", {})
+        if f.is_payable:
+            return modmap.get("payable", "payable")
+        if f.state_mutability == StateMutability.VIEW:
+            return modmap.get("view", "view")
+        if f.state_mutability == StateMutability.PURE:
+            return modmap.get("pure", "pure")
+        return ""   # StateMutability.MUTATING or None (constructor): no keyword needed
+
     def _emit_function(self, f: FunctionDef) -> List[str]:
         lines = []
-        
-        # Add a space before the modifier (payable), if there is one
-        mods = f" {f.modifiers}" if f.modifiers else ""
-        
+
+        keyword = self._resolve_modifier_keyword(f)
+        mods = f" {keyword}" if keyword else ""
+
         if f.is_constructor:
             head = f"constructor({', '.join(f.args)}){mods}"
         else:
-            head = f"function {f.name}({', '.join(f.args)}) {f.visibility}{mods}"
+            visibility = self.config.get("mappings", {}).get("modifiers", {}).get("external", "external")
+            head = f"function {f.name}({', '.join(f.args)}) {visibility}{mods}"
         
         lines.append(f"    {head} {{")
 
@@ -102,7 +119,14 @@ class SolidityEmitter(BaseEmitter):
             if isinstance(n, IRAssign):
                 # If it is a local variable, add the type (e.g. 'uint256 temp_amount = ...')
                 decl = f"{self._map_type(n.decl_type)} " if n.decl_type else ""
-                lines.append(f"{ind}{decl}{n.target} {n.operator} {n.expr};")
+                expr = n.expr
+                # Solidity-specific rendering of the IR's semantic fact (is_payable_target):
+                # cast the value to a payable address, unless it already is one.
+                if n.is_payable_target and "payable(" not in str(expr):
+                    cast_fmt = self.config.get("mappings", {}).get("casting", {}).get("payable")
+                    if cast_fmt:
+                        expr = cast_fmt.format(val=expr)
+                lines.append(f"{ind}{decl}{n.target} {n.operator} {expr};")
                 
             elif isinstance(n, IRNativeTransfer):
                 lines.append(f'{ind}(bool success, ) = payable({n.recipient}).call{{value: {n.amount}}}("");')

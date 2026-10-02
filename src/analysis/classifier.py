@@ -108,14 +108,20 @@ class EffectClassifier:
                 value_src = f"{sym.type}({value_src})"
 
         # --- AUTO EVENTS ---
+        # The should_emit decision is made HERE, against the pre-normalization value_src
+        # (trigger configs compare against the raw IMS value).
+        # The Effect itself is only appended further down, AFTER the state update it reports --
+        # an event announces that a change has happened, so it must follow that change in the
+        # effect order, not precede it.
         constructor_names = self.config.get("constructor_names", ["constructor", "__init__"])
+        emit_effect = None
         if root_target in self.config.get("triggers", {}) and self.current_func not in constructor_names:
             trigger = self.config["triggers"][root_target]
             should_emit = True
             if "value" in trigger and value_src.strip() != trigger["value"]: 
                 should_emit = False
             if should_emit:
-                effects.append(Effect(EffectType.EVENT_EMIT, target=trigger["emit"], payload=trigger["args"]))
+                emit_effect = Effect(EffectType.EVENT_EMIT, target=trigger["emit"], payload=trigger["args"])
 
         # --- BOOLEAN NORMALIZATION ---
         if sym and sym.type in ["Boolean", "bool"]:
@@ -123,6 +129,8 @@ class EffectClassifier:
             if value_src == "0": value_src = "false"
 
         effects.append(Effect(EffectType.STATE_UPDATE, target=target_src, payload=value_src, operator=op))
+        if emit_effect:
+            effects.append(emit_effect)
 
         value_alias = self.config["mappings"]["agents"].get("value", "msg.value")
         if value_alias in value_src:

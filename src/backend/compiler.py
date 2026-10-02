@@ -5,7 +5,8 @@ from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.analysis.semantics import SemanticAnalyzer
 from src.core.effects import EffectType
-from src.core.ir_nodes import IRRequire, Branch, FunctionDef, IRNativeTransfer, IRExternalCall, IRAssign, IREmit
+from src.core.ir_nodes import (IRRequire, Branch, FunctionDef, IRNativeTransfer, IRExternalCall,
+                               IRAssign, IREmit, StateMutability)
 from src.targets import get_target_bundle
 from src.core.validation import validate_config
 from src.core.ast_nodes import (BinaryExpr, UnaryExpr, MemberAccess, Identifier, CallExpr,
@@ -31,7 +32,7 @@ class Compiler:
                  contract_name: str = None, config_path: str = "<config>"):
         """
         :param model_data: Parsed JSON model.
-        :param specific_config: Domain-specific configuration .
+        :param specific_config: Domain-specific configuration (e.g., Auction, Hotel).
         :param target: Target language name ("solidity", "vyper"...).
         """
         self.model = model_data['model']
@@ -283,12 +284,13 @@ class Compiler:
                 continue
             groups.setdefault(self._function_name(act), []).append(act)
 
-        payable_txt = self.config.get("mappings", {}).get("modifiers", {}).get("payable", "payable")
         funcs = []
         for name, acts in groups.items():
             fdef = self._process_func(name, acts)
             no_effects = all(not br.nodes for br in fdef.branches)
-            if (no_effects and not fdef.is_constructor and payable_txt not in (fdef.modifiers or "")
+            # A payable function with no other effects is still meaningful (e.g. a plain
+            # deposit): only guard-only / negative-branch protocols are dropped.
+            if (no_effects and not fdef.is_constructor and not fdef.is_payable
                     and not naming.get("emit_effectless_actions", False)):
                 self.notes.append(
                     f"actions {[a['name'] for a in acts]} skipped: no state change, transfer or event "
@@ -302,7 +304,8 @@ class Compiler:
     def _function_name(self, act):
         """
         action -> target function. Order: explicit `functions` map, then grouping by a configurable
-        separator, then `function_aliases`, then the target's reserved/special function names.
+        separator (default '_': bid_first + bid_replace -> bid), then `function_aliases`,
+        then the target's reserved/special function names.
         """
         cfg = self.config
         action_name = act['name']
@@ -348,7 +351,7 @@ class Compiler:
         that assigns an environment-context attribute (msg.*-mapped) from `<agent>.address`.
         Example: `contract.msg_sender = bidder.address` makes `bidder` an alias of msg.sender.
         This is model-authored intent (the same pattern used to identify simulation-only actions
-        like `setSender`).
+        like `setSender`), not a name-based guess.
         """
         aliases = set()
         for act in self.model['actions']:
@@ -541,9 +544,10 @@ class Compiler:
             func_effects.extend(all_effects)
 
             # --- C. Config-driven Security Reordering (CEI) ---
-            # Default OFF: the model's own postcondition order is preserved by default. 
-            # A model that is deliberately unsafe (e.g. a vulnerable-by-design example) 
-            # must stay unsafe in the generated code unless the user opts in here.
+            # Default OFF: the model's own postcondition order is preserved by default, since IMS
+            # scenario-checking (behavior algebra) reasons about exactly this order. 
+            # A model that is deliberately unsafe (e.g. a vulnerable-by-design example) must stay 
+            # unsafe in the generated code unless the user opts in here.
             if self.config.get("security_patterns", {}).get("cei", False):
                 before = list(all_effects)
                 all_effects.sort(key=lambda e: 0 if e.type == EffectType.STATE_UPDATE else (1 if e.type == EffectType.EVENT_EMIT else 2))
@@ -570,12 +574,9 @@ class Compiler:
                     is_state = sym.is_state if sym else False
 
                     is_target_payable = getattr(sym, 'is_payable', False) if sym else False
-                    if is_target_payable and "payable(" not in str(eff.payload):
-                        cast_fmt = self.config.get("mappings", {}).get("casting", {}).get("payable")
-                        if cast_fmt:
-                            eff.payload = cast_fmt.format(val=eff.payload)
 
-                    ir_nodes.append(IRAssign(eff.target, eff.payload, eff.operator, is_state, decl))
+                    ir_nodes.append(IRAssign(eff.target, eff.payload, eff.operator, is_state, decl,
+                                              is_payable_target=is_target_payable))
                 elif eff.type == EffectType.EVENT_EMIT:
                     ir_nodes.append(IREmit(eff.target, eff.payload))
 
@@ -607,27 +608,21 @@ class Compiler:
         constructor_names = self.config.get("constructor_names", ["constructor", "__init__"])
         is_constructor = name in constructor_names
 
-        # --- F. Capability-based Modifiers ---
-        mut = ""
+        # --- F. Semantic function properties ---
         is_payable = False
-
         if self.config.get("capabilities", {}).get("value_transfer", True):
             is_payable = self.analyzer.uses_native_value or name in self.config.get("payable_funcs", [])
-            if is_payable:
-                mut = self.config.get("mappings", {}).get("modifiers", {}).get("payable", "payable")
 
+        state_mutability = None
         if not is_payable and not is_constructor and self.config.get("capabilities", {}).get("state_mutability", True):
             has_write_effects = any(eff.type in [EffectType.STATE_UPDATE, EffectType.VALUE_OUTFLOW,
                                                  EffectType.EXTERNAL_CALL, EffectType.EVENT_EMIT]
                                     for eff in func_effects)
-            if not has_write_effects:
-                if self.analyzer.reads_state:
-                    mut = self.config.get("mappings", {}).get("modifiers", {}).get("view", "view")
-                else:
-                    mut = self.config.get("mappings", {}).get("modifiers", {}).get("pure", "pure")
+            if has_write_effects:
+                state_mutability = StateMutability.MUTATING
+            elif self.analyzer.reads_state:
+                state_mutability = StateMutability.VIEW
+            else:
+                state_mutability = StateMutability.PURE
 
-        visibility = ""
-        if self.config.get("capabilities", {}).get("visibility_modifiers", True):
-            visibility = self.config.get("mappings", {}).get("modifiers", {}).get("external", "external")
-
-        return FunctionDef(name, typed_args, visibility, mut, common_reqs, branches, is_constructor)
+        return FunctionDef(name, typed_args, is_payable, state_mutability, common_reqs, branches, is_constructor)
